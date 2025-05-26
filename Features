@@ -1,0 +1,29 @@
+Paddle enlargement power-up
+
+10 lives system
+
+Single ball with dynamic color-changing effect
+
+Brick grid (5 rows × 10 columns)
+
+Each brick breaks with 1 hit
+
+Brick opacity fading after hit
+
+Fixed row-wise brick colors (Red, Yellow, Blue, Green, Purple)
+
+Particle effects on brick break
+
+Celebration particles on win
+
+Score tracking
+
+Win and lose message display
+
+Sound effects for hit, win, and lose
+
+Ball resets after loss (if lives remain)
+
+Dark blue game background
+
+Paddle controlled with arrow keys
