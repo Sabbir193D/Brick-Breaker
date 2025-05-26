@@ -29,8 +29,18 @@ struct Ball {
     float x, y;
     float speedX, speedY;
     float radius;
+    float colorAngle = 0.0f;
 };
 std::vector<Ball> balls = {{width / 2, height / 2, 5, 5, 10}};
+
+// Particle struct for debris and celebration
+struct Particle {
+    float x, y;
+    float dx, dy;
+    float life;
+    bool isCelebration = false;
+};
+std::vector<Particle> particles;
 
 // Bricks
 const int rows = 5;
@@ -38,6 +48,7 @@ const int cols = 10;
 const int brickWidth = 70;
 const int brickHeight = 25;
 std::vector<std::vector<int>> bricks;
+std::vector<std::vector<float>> brickOpacity;
 
 // Score, lives, and game state
 int score = 0;
@@ -46,6 +57,8 @@ bool gameWon = false;
 bool gameLost = false;
 bool showWinMessage = false;
 bool showLoseMessage = false;
+bool winSoundPlayed = false;
+bool loseSoundPlayed = false;
 
 // Fixed colors for brick rows (red, yellow, blue, green, purple)
 float brickColors[rows][3] = {
@@ -56,9 +69,9 @@ float brickColors[rows][3] = {
     {0.6f, 0.0f, 0.6f}    // Purple
 };
 
-// Draw rectangle
-void drawRect(float x, float y, float w, float h, float r, float g, float b) {
-    glColor3f(r, g, b);
+// Draw rectangle with opacity
+void drawRect(float x, float y, float w, float h, float r, float g, float b, float alpha = 1.0f) {
+    glColor4f(r, g, b, alpha);
     glBegin(GL_QUADS);
     glVertex2f(x, y);
     glVertex2f(x + w, y);
@@ -75,9 +88,14 @@ void drawText(float x, float y, const std::string& text) {
     }
 }
 
-// Draw ball
-void drawBall(const Ball& ball) {
-    glColor3f(1.0f, 0.2f, 0.4f);
+// Draw ball with color spin
+void drawBall(Ball& ball) {
+    ball.colorAngle += 0.05f;
+    float r = fabs(sin(ball.colorAngle));
+    float g = fabs(sin(ball.colorAngle + 2.0f));
+    float b = fabs(sin(ball.colorAngle + 4.0f));
+
+    glColor3f(r, g, b);
     glBegin(GL_TRIANGLE_FAN);
     glVertex2f(ball.x, ball.y);
     for (int i = 0; i <= 100; ++i) {
@@ -87,111 +105,117 @@ void drawBall(const Ball& ball) {
     glEnd();
 }
 
-// Initialize bricks with hit points 1
+// Draw particles
+void drawParticles() {
+    for (auto& p : particles) {
+        if (p.isCelebration)
+            glColor3f(fabs(sin(p.x)), fabs(sin(p.y)), fabs(sin(p.life)));
+        else
+            glColor3f(1, 1, 1);
+
+        glBegin(GL_POINTS);
+        glVertex2f(p.x, p.y);
+        glEnd();
+    }
+}
+
+// Initialize bricks with hit points 1 and opacity 1.0
 void initBricks() {
     bricks = std::vector<std::vector<int>>(rows, std::vector<int>(cols, 1));
+    brickOpacity = std::vector<std::vector<float>>(rows, std::vector<float>(cols, 1.0f));
 }
 
 // Display function
 void display() {
-    // Dark blue background
     glClearColor(0.0f, 0.0f, 0.3f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     if (showWinMessage) {
-        glColor3f(0, 1, 0);
-        drawText(width / 2 - 50, height / 2, "You Win!");
-        glutSwapBuffers();
-        return;
+        glColor3f(1, 1, 0);
+        drawText(width / 2 - 50, height / 2, "YOU WIN!");
     }
-
     if (showLoseMessage) {
         glColor3f(1, 0, 0);
-        drawText(width / 2 - 50, height / 2, "You Lost!");
-        glutSwapBuffers();
-        return;
+        drawText(width / 2 - 50, height / 2, "YOU LOST!");
     }
 
-    // Draw paddle
     drawRect(paddleX, paddleY, paddleWidth, paddleHeight, 0.2f, 0.6f, 1.0f);
+    for (Ball& ball : balls) drawBall(ball);
+    drawParticles();
 
-    // Draw balls
-    for (const Ball& ball : balls) {
-        drawBall(ball);
-    }
-
-    // Draw bricks with fixed row colors
     for (int i = 0; i < rows; ++i) {
         float r = brickColors[i][0];
         float g = brickColors[i][1];
         float b = brickColors[i][2];
         for (int j = 0; j < cols; ++j) {
-            if (bricks[i][j] > 0) {
+            if (bricks[i][j] > 0 || brickOpacity[i][j] > 0.0f) {
                 float x = 60 + j * (brickWidth + 10);
                 float y = height - 50 - i * (brickHeight + 10);
-                drawRect(x, y, brickWidth, brickHeight, r, g, b);
+                drawRect(x, y, brickWidth, brickHeight, r, g, b, brickOpacity[i][j]);
             }
         }
     }
 
-    // Draw score and lives
     glColor3f(1, 1, 1);
     drawText(10, height - 20, "Score: " + std::to_string(score) + " | Lives: " + std::to_string(lives));
-
     glutSwapBuffers();
 }
 
 // Ball movement and collision
 void update(int value) {
-    if (showWinMessage || showLoseMessage) return;
+    for (Particle& p : particles) {
+        p.x += p.dx;
+        p.y += p.dy;
+        p.life -= 0.02f;
+    }
+    particles.erase(std::remove_if(particles.begin(), particles.end(), [](const Particle& p) {
+        return p.life <= 0;
+    }), particles.end());
+
+    for (int i = 0; i < rows; ++i)
+        for (int j = 0; j < cols; ++j)
+            if (bricks[i][j] == 0 && brickOpacity[i][j] > 0.0f)
+                brickOpacity[i][j] -= 0.05f;
 
     for (Ball& ball : balls) {
         ball.x += ball.speedX;
         ball.y += ball.speedY;
 
-        // Wall collision
-        if (ball.x < ball.radius) {
-            ball.x = ball.radius;
-            ball.speedX = -ball.speedX;
-        }
-        if (ball.x > width - ball.radius) {
-            ball.x = width - ball.radius;
-            ball.speedX = -ball.speedX;
-        }
-        if (ball.y > height - ball.radius) {
-            ball.y = height - ball.radius;
-            ball.speedY = -ball.speedY;
-        }
+        if (ball.x < ball.radius || ball.x > width - ball.radius) ball.speedX = -ball.speedX;
+        if (ball.y > height - ball.radius) ball.speedY = -ball.speedY;
 
-        // Paddle collision
         if (ball.y - ball.radius < paddleY + paddleHeight &&
             ball.x > paddleX && ball.x < paddleX + paddleWidth &&
             ball.y > paddleY) {
             ball.speedY = -ball.speedY;
-            ball.y = paddleY + paddleHeight + ball.radius; // prevent sticking
+            ball.y = paddleY + paddleHeight + ball.radius;
         }
 
-        // Brick collision
         for (int i = 0; i < rows; ++i) {
             for (int j = 0; j < cols; ++j) {
                 if (bricks[i][j] > 0) {
-                    float brickX = 60 + j * (brickWidth + 10);
-                    float brickY = height - 50 - i * (brickHeight + 10);
+                    float x = 60 + j * (brickWidth + 10);
+                    float y = height - 50 - i * (brickHeight + 10);
+                    if (ball.x + ball.radius > x && ball.x - ball.radius < x + brickWidth &&
+                        ball.y + ball.radius > y && ball.y - ball.radius < y + brickHeight) {
 
-                    if (ball.x + ball.radius > brickX && ball.x - ball.radius < brickX + brickWidth &&
-                        ball.y + ball.radius > brickY && ball.y - ball.radius < brickY + brickHeight) {
                         ball.speedY = -ball.speedY;
-                        bricks[i][j]--;
+                        bricks[i][j] = 0;
                         score += 10;
 
-                        PlaySound("C:\\Windows\\Media\\chimes.wav", NULL, SND_FILENAME | SND_ASYNC);  // Score sound
+                        for (int k = 0; k < 20; ++k) {
+                            float angle = static_cast<float>(rand()) / RAND_MAX * 2 * 3.14159f;
+                            float speed = static_cast<float>(rand()) / RAND_MAX * 2.0f + 1.0f;
+                            particles.push_back({ball.x, ball.y, cos(angle) * speed, sin(angle) * speed, 1.0f});
+                        }
 
-                        // Power-up chance: 10%
+                        PlaySound("C:\\Windows\\Media\\notify.wav", NULL, SND_FILENAME | SND_ASYNC);
+
                         if ((rand() % 10) == 0) {
                             paddleWidth += 15;
                             if (paddleWidth > 200) paddleWidth = 200;
-
-                            PlaySound("C:\\Windows\\Media\\Windows Balloon.wav", NULL, SND_FILENAME | SND_ASYNC); // Power-up sound
                         }
                     }
                 }
@@ -199,46 +223,39 @@ void update(int value) {
         }
     }
 
-    // Remove balls that fall below screen (lose life)
-    auto it = std::remove_if(balls.begin(), balls.end(), [](const Ball& b) {
-        return b.y < 0;
-    });
+    auto it = std::remove_if(balls.begin(), balls.end(), [](const Ball& b) { return b.y < 0; });
     if (it != balls.end()) {
         int lostBalls = std::distance(it, balls.end());
         balls.erase(it, balls.end());
         lives -= lostBalls;
     }
 
-    // If no balls left but lives remain, reset ball and paddle
     if (balls.empty() && lives > 0) {
         balls.push_back({width / 2, height / 2, 5, 5, 10});
         paddleWidth = 100;
     }
 
-    // Check game over
-    if (lives <= 0 && !showLoseMessage) {
+    if (lives <= 0 && !loseSoundPlayed) {
         gameLost = true;
         showLoseMessage = true;
-
-        PlaySound("C:\\Windows\\Media\\Windows Error.wav", NULL, SND_FILENAME | SND_ASYNC);  // Game over sound
+        PlaySound("C:\\Windows\\Media\\Windows Error.wav", NULL, SND_FILENAME | SND_ASYNC);
+        loseSoundPlayed = true;
     }
 
-    // Check win condition: all bricks cleared
     bool allBricksCleared = true;
-    for (const auto& row : bricks) {
-        for (int brick : row) {
-            if (brick > 0) {
-                allBricksCleared = false;
-                break;
-            }
-        }
-        if (!allBricksCleared) break;
-    }
-    if (allBricksCleared && !showWinMessage) {
+    for (const auto& row : bricks) for (int brick : row) if (brick > 0) allBricksCleared = false;
+    if (allBricksCleared && !winSoundPlayed) {
         gameWon = true;
         showWinMessage = true;
-
-        PlaySound("C:\\Windows\\Media\\tada.wav", NULL, SND_FILENAME | SND_ASYNC);  // Win sound
+        PlaySound("C:\\Windows\\Media\\tada.wav", NULL, SND_FILENAME | SND_ASYNC);
+        winSoundPlayed = true;
+        for (int i = 0; i < 200; ++i) {
+            float x = rand() % width;
+            float y = rand() % 100 + height / 2;
+            float dx = ((rand() % 100) / 50.0f - 1) * 2;
+            float dy = ((rand() % 100) / 50.0f) * 3 + 1;
+            particles.push_back({x, y, dx, dy, 1.5f, true});
+        }
     }
 
     glutPostRedisplay();
@@ -247,28 +264,24 @@ void update(int value) {
 
 // Keyboard controls
 void keyboard(int key, int, int) {
-    switch (key) {
-        case GLUT_KEY_LEFT:
-            paddleX -= paddleSpeed;
-            if (paddleX < 0) paddleX = 0;
-            break;
-        case GLUT_KEY_RIGHT:
-            paddleX += paddleSpeed;
-            if (paddleX + paddleWidth > width) paddleX = width - paddleWidth;
-            break;
+    if (key == GLUT_KEY_LEFT) {
+        paddleX -= paddleSpeed;
+        if (paddleX < 0) paddleX = 0;
+    } else if (key == GLUT_KEY_RIGHT) {
+        paddleX += paddleSpeed;
+        if (paddleX + paddleWidth > width) paddleX = width - paddleWidth;
     }
     glutPostRedisplay();
 }
 
 // Main function
 int main(int argc, char **argv) {
-    printf("Starting game...\n");
     srand(time(0));
     initBricks();
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
     glutInitWindowSize(width, height);
-    glutCreateWindow("Colorful Brick Breaker with Lives and Power-ups");
+    glutCreateWindow("Polished Brick Breaker");
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     gluOrtho2D(0, width, 0, height);
@@ -279,3 +292,4 @@ int main(int argc, char **argv) {
     glutMainLoop();
     return 0;
 }
+
